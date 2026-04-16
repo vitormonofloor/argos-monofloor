@@ -574,9 +574,51 @@ tr:hover{background:#1a1a1a}
 .logo-text{font-size:28px;font-weight:300;letter-spacing:6px;color:#c4a77d;text-transform:uppercase}
 .logo-tag{font-size:9px;letter-spacing:3px;color:#666;text-transform:uppercase}
 .header-bar{display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;gap:20px;flex-wrap:wrap}
-.hermes-btn{display:inline-flex;align-items:center;gap:14px;padding:12px 20px;background:linear-gradient(135deg, #1a1510 0%, #141414 100%);border:1px solid #2a2015;border-radius:10px;text-decoration:none;color:#e0e0e0;transition:all 0.25s;position:relative;overflow:hidden}
+.hermes-btn{display:inline-flex;align-items:center;gap:14px;padding:12px 20px;background:linear-gradient(135deg, #1a1510 0%, #141414 100%);border:1px solid #2a2015;border-radius:10px;text-decoration:none;color:#e0e0e0;transition:all 0.25s;position:relative;overflow:hidden;cursor:pointer}
 .hermes-btn:hover{border-color:#c4a77d;background:linear-gradient(135deg, #2a1f10 0%, #1a1510 100%);transform:translateY(-1px);box-shadow:0 4px 20px #c4a77d15}
 .hermes-btn:hover .hermes-arrow{transform:translateX(4px)}
+
+/* HERMES PORTAL — wings animation overlay */
+.hermes-portal{position:fixed;inset:0;background:#0a0a0a;z-index:9999;display:flex;align-items:center;justify-content:center;flex-direction:column;opacity:0;pointer-events:none;transition:opacity 0.5s ease}
+.hermes-portal.active{opacity:1;pointer-events:auto}
+.hermes-portal::before{content:"";position:absolute;inset:0;background:radial-gradient(ellipse 60% 50% at 50% 50%, #2a1f10 0%, transparent 70%);opacity:0;animation:portal-glow 2.5s ease-out forwards}
+.wings-wrap{position:relative;width:420px;height:280px;display:flex;align-items:center;justify-content:center}
+.wing{position:absolute;top:50%;width:200px;height:240px;transform-origin:85% 50%;opacity:0}
+.wing-left{right:50%;transform:translate(-10px,-50%) scaleX(-1) rotate(10deg);animation:wing-left-anim 2.5s ease-in-out forwards}
+.wing-right{left:50%;transform:translate(-10px,-50%) rotate(10deg);animation:wing-right-anim 2.5s ease-in-out forwards}
+.hermes-label{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:42px;letter-spacing:14px;color:#c4a77d;text-transform:uppercase;font-weight:300;opacity:0;animation:label-fade 2.5s ease-out forwards;text-shadow:0 0 30px #c4a77d50}
+.hermes-tagline{margin-top:24px;font-size:11px;letter-spacing:4px;color:#666;text-transform:uppercase;opacity:0;animation:tagline-fade 2.5s ease-out forwards}
+@keyframes portal-glow{0%{opacity:0}30%{opacity:1}70%{opacity:1}100%{opacity:0}}
+@keyframes wing-left-anim{
+  0%{opacity:0;transform:translate(-10px,-50%) scaleX(-1) rotate(10deg) scale(0.4)}
+  15%{opacity:1;transform:translate(-10px,-50%) scaleX(-1) rotate(-35deg) scale(1)}
+  30%{transform:translate(-10px,-50%) scaleX(-1) rotate(15deg) scale(1)}
+  45%{transform:translate(-10px,-50%) scaleX(-1) rotate(-30deg) scale(1)}
+  60%{transform:translate(-10px,-50%) scaleX(-1) rotate(10deg) scale(1)}
+  75%{transform:translate(-10px,-50%) scaleX(-1) rotate(-20deg) scale(1.05)}
+  100%{opacity:0;transform:translate(-10px,-50%) scaleX(-1) rotate(-5deg) scale(1.3)}
+}
+@keyframes wing-right-anim{
+  0%{opacity:0;transform:translate(-10px,-50%) rotate(10deg) scale(0.4)}
+  15%{opacity:1;transform:translate(-10px,-50%) rotate(-35deg) scale(1)}
+  30%{transform:translate(-10px,-50%) rotate(15deg) scale(1)}
+  45%{transform:translate(-10px,-50%) rotate(-30deg) scale(1)}
+  60%{transform:translate(-10px,-50%) rotate(10deg) scale(1)}
+  75%{transform:translate(-10px,-50%) rotate(-20deg) scale(1.05)}
+  100%{opacity:0;transform:translate(-10px,-50%) rotate(-5deg) scale(1.3)}
+}
+@keyframes label-fade{
+  0%{opacity:0;letter-spacing:6px}
+  20%{opacity:0;letter-spacing:6px}
+  40%{opacity:1;letter-spacing:14px}
+  80%{opacity:1;letter-spacing:18px}
+  100%{opacity:0;letter-spacing:24px}
+}
+@keyframes tagline-fade{
+  0%,40%{opacity:0}
+  60%,80%{opacity:0.7}
+  100%{opacity:0}
+}
 .hermes-icon{font-size:18px;color:#c4a77d}
 .hermes-label{display:flex;flex-direction:column;line-height:1.2}
 .hermes-name{font-size:14px;font-weight:600;color:#c4a77d;letter-spacing:0.5px}
@@ -642,6 +684,72 @@ tr:hover{background:#1a1a1a}
 </style>
 </head>
 <body>
+
+<!-- HERMES PORTAL — wings animation -->
+<div class="hermes-portal" id="hermesPortal">
+  <div class="wings-wrap">
+    <svg class="wing wing-left" viewBox="0 0 200 240" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <linearGradient id="featherGradL" x1="100%" y1="0%" x2="0%" y2="0%">
+          <stop offset="0%" stop-color="#c4a77d" stop-opacity="1"/>
+          <stop offset="70%" stop-color="#8a6f45" stop-opacity="0.8"/>
+          <stop offset="100%" stop-color="#4a3a20" stop-opacity="0.3"/>
+        </linearGradient>
+      </defs>
+      <g fill="url(#featherGradL)">
+        <!-- Penas da asa esquerda (serão espelhadas por CSS) -->
+        <path d="M 180 120 Q 140 40 40 70 Q 90 90 130 110 Q 160 115 180 120 Z" opacity="0.95"/>
+        <path d="M 180 120 Q 150 60 60 85 Q 100 100 140 115 Q 165 118 180 120 Z" opacity="0.9"/>
+        <path d="M 180 120 Q 160 80 75 100 Q 115 110 145 118 Q 170 120 180 120 Z" opacity="0.85"/>
+        <path d="M 180 120 Q 165 100 90 115 Q 125 120 150 122 Q 172 122 180 120 Z" opacity="0.8"/>
+        <path d="M 180 120 Q 165 140 90 130 Q 125 125 150 123 Q 172 122 180 120 Z" opacity="0.8"/>
+        <path d="M 180 120 Q 160 160 75 150 Q 115 135 145 125 Q 170 122 180 120 Z" opacity="0.85"/>
+        <path d="M 180 120 Q 150 185 60 165 Q 100 145 140 130 Q 165 122 180 120 Z" opacity="0.9"/>
+        <path d="M 180 120 Q 140 205 40 180 Q 90 155 130 135 Q 160 125 180 120 Z" opacity="0.95"/>
+      </g>
+      <!-- Hastes das penas -->
+      <g stroke="#c4a77d" stroke-width="0.6" fill="none" opacity="0.4">
+        <path d="M 180 120 Q 130 70 45 72"/>
+        <path d="M 180 120 Q 140 90 65 92"/>
+        <path d="M 180 120 Q 150 110 85 110"/>
+        <path d="M 180 120 Q 150 130 85 132"/>
+        <path d="M 180 120 Q 140 150 65 152"/>
+        <path d="M 180 120 Q 130 170 45 170"/>
+      </g>
+    </svg>
+
+    <svg class="wing wing-right" viewBox="0 0 200 240" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <linearGradient id="featherGradR" x1="100%" y1="0%" x2="0%" y2="0%">
+          <stop offset="0%" stop-color="#c4a77d" stop-opacity="1"/>
+          <stop offset="70%" stop-color="#8a6f45" stop-opacity="0.8"/>
+          <stop offset="100%" stop-color="#4a3a20" stop-opacity="0.3"/>
+        </linearGradient>
+      </defs>
+      <g fill="url(#featherGradR)">
+        <path d="M 180 120 Q 140 40 40 70 Q 90 90 130 110 Q 160 115 180 120 Z" opacity="0.95"/>
+        <path d="M 180 120 Q 150 60 60 85 Q 100 100 140 115 Q 165 118 180 120 Z" opacity="0.9"/>
+        <path d="M 180 120 Q 160 80 75 100 Q 115 110 145 118 Q 170 120 180 120 Z" opacity="0.85"/>
+        <path d="M 180 120 Q 165 100 90 115 Q 125 120 150 122 Q 172 122 180 120 Z" opacity="0.8"/>
+        <path d="M 180 120 Q 165 140 90 130 Q 125 125 150 123 Q 172 122 180 120 Z" opacity="0.8"/>
+        <path d="M 180 120 Q 160 160 75 150 Q 115 135 145 125 Q 170 122 180 120 Z" opacity="0.85"/>
+        <path d="M 180 120 Q 150 185 60 165 Q 100 145 140 130 Q 165 122 180 120 Z" opacity="0.9"/>
+        <path d="M 180 120 Q 140 205 40 180 Q 90 155 130 135 Q 160 125 180 120 Z" opacity="0.95"/>
+      </g>
+      <g stroke="#c4a77d" stroke-width="0.6" fill="none" opacity="0.4">
+        <path d="M 180 120 Q 130 70 45 72"/>
+        <path d="M 180 120 Q 140 90 65 92"/>
+        <path d="M 180 120 Q 150 110 85 110"/>
+        <path d="M 180 120 Q 150 130 85 132"/>
+        <path d="M 180 120 Q 140 150 65 152"/>
+        <path d="M 180 120 Q 130 170 45 170"/>
+      </g>
+    </svg>
+
+    <div class="hermes-label">Hermes</div>
+  </div>
+  <div class="hermes-tagline">análise diária · monofloor</div>
+</div>
 <div class="header-bar">
   <div class="logo">
     <div>
@@ -969,6 +1077,18 @@ document.addEventListener('keydown', (e) => {
     document.querySelectorAll('.modal-overlay.open').forEach(m => m.classList.remove('open'));
     document.body.style.overflow = '';
   }
+});
+
+// HERMES PORTAL — animação de asas antes da navegação
+document.querySelectorAll('.hermes-btn').forEach(btn => {
+  btn.addEventListener('click', (e) => {
+    e.preventDefault();
+    const portal = document.getElementById('hermesPortal');
+    const target = btn.getAttribute('href');
+    document.body.style.overflow = 'hidden';
+    portal.classList.add('active');
+    setTimeout(() => { window.location.href = target; }, 2400);
+  });
 });
 </script>
 </body></html>`;
