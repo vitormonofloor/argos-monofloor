@@ -570,9 +570,19 @@ tr:hover{background:#1a1a1a}
 .alert-box:hover{border-color:#ff6b6b}
 .alert-box h4{color:#ef4444;font-size:14px;margin-bottom:6px}
 .alert-box p{font-size:12px;color:#ccc}
-.logo{display:flex;align-items:center;gap:12px;margin-bottom:24px}
+.logo{display:flex;align-items:center;gap:12px}
 .logo-text{font-size:28px;font-weight:300;letter-spacing:6px;color:#c4a77d;text-transform:uppercase}
 .logo-tag{font-size:9px;letter-spacing:3px;color:#666;text-transform:uppercase}
+.header-bar{display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;gap:20px;flex-wrap:wrap}
+.hermes-btn{display:inline-flex;align-items:center;gap:14px;padding:12px 20px;background:linear-gradient(135deg, #1a1510 0%, #141414 100%);border:1px solid #2a2015;border-radius:10px;text-decoration:none;color:#e0e0e0;transition:all 0.25s;position:relative;overflow:hidden}
+.hermes-btn:hover{border-color:#c4a77d;background:linear-gradient(135deg, #2a1f10 0%, #1a1510 100%);transform:translateY(-1px);box-shadow:0 4px 20px #c4a77d15}
+.hermes-btn:hover .hermes-arrow{transform:translateX(4px)}
+.hermes-icon{font-size:18px;color:#c4a77d}
+.hermes-label{display:flex;flex-direction:column;line-height:1.2}
+.hermes-name{font-size:14px;font-weight:600;color:#c4a77d;letter-spacing:0.5px}
+.hermes-sub{font-size:10px;color:#888;text-transform:uppercase;letter-spacing:1px;margin-top:2px}
+.hermes-arrow{color:#666;transition:transform 0.25s;font-size:16px}
+@media (max-width:600px){.hermes-sub{display:none}}
 .section{margin-bottom:32px}
 .section-title{font-size:15px;font-weight:600;color:#c4a77d;margin-bottom:12px;padding-bottom:6px;border-bottom:1px solid #222}
 /* MODAL */
@@ -632,11 +642,21 @@ tr:hover{background:#1a1a1a}
 </style>
 </head>
 <body>
-<div class="logo">
-  <div>
-    <div class="logo-text">monofloor</div>
-    <div class="logo-tag">Premium Unique Surfaces™</div>
+<div class="header-bar">
+  <div class="logo">
+    <div>
+      <div class="logo-text">monofloor</div>
+      <div class="logo-tag">Premium Unique Surfaces™</div>
+    </div>
   </div>
+  <a href="analise.html" class="hermes-btn">
+    <span class="hermes-icon">◆</span>
+    <span class="hermes-label">
+      <span class="hermes-name">Hermes</span>
+      <span class="hermes-sub">Ler análise diária</span>
+    </span>
+    <span class="hermes-arrow">→</span>
+  </a>
 </div>
 
 <h1>Painel de Indicadores Operacionais</h1>
