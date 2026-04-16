@@ -83,6 +83,16 @@ async function extrairDadosKIRA() {
       const ocTipos = {};
       ocs.forEach(o => { const t = o.tipo || '?'; ocTipos[t] = (ocTipos[t] || 0) + 1; });
 
+      // Detalhes das ocorrências (para drill-down)
+      const ocsDetalhes = ocs.slice(0, 30).map(o => ({
+        titulo: o.titulo || '?',
+        tipo: o.tipo || '?',
+        severidade: o.severidade || '?',
+        status: o.status || '?',
+        criado: o.createdAt || null,
+        descricao: (o.descricao || '').substring(0, 200),
+      }));
+
       return {
         id: pid,
         nome: proj.clienteNome || '?',
@@ -105,6 +115,7 @@ async function extrairDadosKIRA() {
         atividadePorDia,
         totalOcs: ocs.length,
         ocTipos,
+        ocsDetalhes,
         ocsCriticas: ocs.filter(o => o.severidade === 'critica').length,
         ocsAltas: ocs.filter(o => o.severidade === 'alta').length,
         ocsAbertas: ocs.filter(o => o.status === 'aberta').length,
@@ -232,8 +243,55 @@ function computarIndicadores(projetos, allProjects) {
 function gerarDashboard(dados) {
   const { projetos, indicadores: I, meta } = dados;
   const dataFmt = new Date(meta.geradoEm).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+  const agora = new Date();
+  const finais = ['finalizado', 'concluido', 'cancelado'];
 
-  // Activity chart data
+  // ── PREPARAR DADOS PARA DRILL-DOWN ──
+
+  // 1. Projetos silenciosos (detalhes)
+  const silenciososDetalhes = projetos
+    .filter(p => p.msgs30d === 0 && !finais.includes(p.status))
+    .map(p => ({ nome: p.nome, status: p.status, fase: p.fase, consultor: p.consultor, cidade: p.cidade }));
+
+  // 2. Todas as ocorrências consolidadas
+  const todasOcs = [];
+  projetos.forEach(p => {
+    (p.ocsDetalhes || []).forEach(o => {
+      todasOcs.push({ ...o, projeto: p.nome, consultor: p.consultor });
+    });
+  });
+
+  // 3. Ocorrências críticas (drill-down)
+  const ocsCriticasDetalhes = todasOcs
+    .filter(o => o.severidade === 'critica')
+    .sort((a, b) => (b.criado || '').localeCompare(a.criado || ''));
+
+  // 4. Projetos atrasados (detalhes)
+  const atrasadosDetalhes = projetos
+    .filter(p => {
+      if (!p.dataExecPrevista || finais.includes(p.status)) return false;
+      try { return new Date(p.dataExecPrevista) < agora; } catch { return false; }
+    })
+    .map(p => {
+      const dias = Math.floor((agora - new Date(p.dataExecPrevista)) / 86400000);
+      return { nome: p.nome, diasAtraso: dias, status: p.status, fase: p.fase, consultor: p.consultor, previsto: p.dataExecPrevista };
+    })
+    .sort((a, b) => b.diasAtraso - a.diasAtraso);
+
+  // 5. Projetos com mensagens (detalhes)
+  const ativosDetalhes = projetos
+    .filter(p => p.msgs30d > 0)
+    .sort((a, b) => b.msgs30d - a.msgs30d)
+    .slice(0, 50)
+    .map(p => ({ nome: p.nome, msgs: p.msgs30d, tg: p.msgsTG, wa: p.msgsWA, dias: p.diasAtivos, autores: p.autores, fase: p.fase }));
+
+  // 6. Ocorrências por severidade
+  const ocsPorSev = { critica: [], alta: [], media: [], baixa: [] };
+  todasOcs.forEach(o => {
+    if (ocsPorSev[o.severidade]) ocsPorSev[o.severidade].push(o);
+  });
+
+  // Activity chart
   const diasOrdenados = Object.entries(I.atividadeGlobal).sort((a, b) => a[0].localeCompare(b[0]));
   const maxMsgs = Math.max(...diasOrdenados.map(d => d[1]), 1);
 
@@ -256,19 +314,18 @@ function gerarDashboard(dados) {
       return `<tr><td>${r}</td><td>${d.obras}</td><td>${d.msgs}</td><td>${avg}</td><td>${d.ocs}</td></tr>`;
     }).join('');
 
-  // Problem projects rows
+  // Problem projects
   const probRows = I.problematicos.map(p =>
     `<tr><td>${p.nome.substring(0, 30)}</td><td>${p.msgs30d}</td><td class="oc-cell">${p.totalOcs}</td><td>${p.autores}</td><td>${(p.consultor || '').split(' ')[0]}</td><td><span class="badge ${p.status}">${p.fase.substring(0, 20)}</span></td></tr>`
   ).join('');
 
-  // Ocorrência types
+  // Tipos
   const tipoRows = Object.entries(I.tiposOcs)
     .sort((a, b) => b[1] - a[1])
     .slice(0, 10)
     .map(([t, c]) => `<tr><td>${t.replace(/_/g, ' ')}</td><td>${c}</td><td><div class="bar" style="width:${(c / I.totalOcs * 100).toFixed(0)}%"></div></td></tr>`)
     .join('');
 
-  // Activity bars
   const actBars = diasOrdenados.map(([dia, count]) => {
     const pct = (count / maxMsgs * 100).toFixed(0);
     const label = dia.substring(5);
@@ -276,10 +333,36 @@ function gerarDashboard(dados) {
     return `<div class="act-col${isWeekend ? ' weekend' : ''}"><div class="act-bar" style="height:${pct}%"><span class="act-val">${count}</span></div><div class="act-label">${label}</div></div>`;
   }).join('');
 
-  // Silent projects
   const silRows = I.silenciosos.slice(0, 15).map(s =>
     `<tr><td>${s.nome.substring(0, 30)}</td><td>${s.status}</td><td>${s.fase.substring(0, 25)}</td></tr>`
   ).join('');
+
+  // ── PRÉ-RENDERIZAR TABELAS DOS MODAIS ──
+
+  const modalMsgsTable = ativosDetalhes.map(p =>
+    `<tr><td>${p.nome.substring(0, 35)}</td><td class="num">${p.msgs}</td><td class="num">${p.tg}</td><td class="num">${p.wa}</td><td class="num">${p.dias}/30</td><td class="num">${p.autores}</td><td>${p.fase.substring(0, 22)}</td></tr>`
+  ).join('');
+
+  const modalSilTable = silenciososDetalhes.map(s =>
+    `<tr><td>${s.nome.substring(0, 35)}</td><td><span class="tag">${s.status}</span></td><td>${(s.fase || '?').substring(0, 25)}</td><td>${(s.consultor || '').split(' ').slice(0, 2).join(' ')}</td></tr>`
+  ).join('');
+
+  const modalOcsTable = todasOcs.slice(0, 100).sort((a, b) => {
+    const sevOrder = { critica: 0, alta: 1, media: 2, baixa: 3, '?': 4 };
+    return (sevOrder[a.severidade] || 5) - (sevOrder[b.severidade] || 5);
+  }).map(o =>
+    `<tr><td><span class="sev-${o.severidade}">${o.severidade}</span></td><td>${(o.titulo || '?').substring(0, 50)}</td><td>${o.projeto.substring(0, 25)}</td><td>${(o.tipo || '?').replace(/_/g, ' ')}</td></tr>`
+  ).join('');
+
+  const modalCritTable = ocsCriticasDetalhes.map(o =>
+    `<tr><td>${(o.titulo || '?').substring(0, 55)}</td><td>${o.projeto.substring(0, 22)}</td><td>${(o.tipo || '?').replace(/_/g, ' ')}</td><td>${o.criado ? new Date(o.criado).toLocaleDateString('pt-BR') : '?'}</td></tr>`
+  ).join('');
+
+  const modalAtrasoTable = atrasadosDetalhes.map(p =>
+    `<tr><td>${p.nome.substring(0, 32)}</td><td class="num sev-critica">${p.diasAtraso}d</td><td>${p.fase.substring(0, 22)}</td><td><span class="tag">${p.status}</span></td><td>${(p.consultor || '').split(' ').slice(0, 2).join(' ')}</td></tr>`
+  ).join('');
+
+  const totalAtivos = projetos.length;
 
   return `<!DOCTYPE html>
 <html lang="pt-BR">
@@ -295,10 +378,15 @@ h1{font-size:22px;font-weight:600;color:#c4a77d;margin-bottom:4px}
 .grid{display:grid;gap:16px;margin-bottom:24px}
 .g2{grid-template-columns:repeat(auto-fit,minmax(300px,1fr))}
 .g4{grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}
-.g3{grid-template-columns:repeat(auto-fit,minmax(200px,1fr))}
 .card{background:#141414;border:1px solid #222;border-radius:10px;padding:16px}
 .card h3{font-size:13px;color:#888;text-transform:uppercase;letter-spacing:.5px;margin-bottom:12px}
-.kpi{text-align:center;padding:20px 12px}
+.kpi{text-align:center;padding:20px 12px;transition:transform .15s,border-color .15s}
+.kpi.clickable{cursor:pointer}
+.kpi.clickable:hover{transform:translateY(-2px);border-color:#c4a77d}
+.kpi.clickable::after{content:"";position:absolute;top:8px;right:10px;width:14px;height:14px;border:1px solid #444;border-radius:50%;display:flex;align-items:center;justify-content:center}
+.kpi{position:relative}
+.kpi.clickable::before{content:"i";position:absolute;top:8px;right:10px;width:14px;height:14px;font-size:9px;color:#666;font-style:italic;text-align:center;line-height:14px;border:1px solid #333;border-radius:50%}
+.kpi.clickable:hover::before{color:#c4a77d;border-color:#c4a77d}
 .kpi .val{font-size:32px;font-weight:700;line-height:1}
 .kpi .label{font-size:11px;color:#888;margin-top:6px}
 .kpi.red .val{color:#ef4444}
@@ -309,11 +397,16 @@ h1{font-size:22px;font-weight:600;color:#c4a77d;margin-bottom:4px}
 table{width:100%;border-collapse:collapse;font-size:13px}
 th{text-align:left;color:#888;font-weight:500;padding:8px 10px;border-bottom:1px solid #333}
 td{padding:8px 10px;border-bottom:1px solid #1a1a1a}
+.num{text-align:right;font-variant-numeric:tabular-nums}
 tr:hover{background:#1a1a1a}
 .oc-cell{color:#ef4444;font-weight:600}
-.badge{display:inline-block;font-size:10px;padding:2px 8px;border-radius:4px;background:#222;color:#aaa}
+.badge,.tag{display:inline-block;font-size:10px;padding:2px 8px;border-radius:4px;background:#222;color:#aaa}
 .badge.em_execucao{background:#1a3a1a;color:#4ade80}
 .badge.reparo{background:#3a1a1a;color:#f87171}
+.sev-critica{color:#ef4444;font-weight:600;text-transform:uppercase;font-size:11px}
+.sev-alta{color:#f59e0b;font-weight:600;text-transform:uppercase;font-size:11px}
+.sev-media{color:#fbbf24;font-size:11px}
+.sev-baixa{color:#888;font-size:11px}
 .bar{height:8px;background:#c4a77d;border-radius:4px;min-width:2px}
 .act-wrap{display:flex;align-items:flex-end;gap:2px;height:120px;padding:0 4px}
 .act-col{flex:1;display:flex;flex-direction:column;align-items:center;min-width:0}
@@ -322,7 +415,8 @@ tr:hover{background:#1a1a1a}
 .act-val{font-size:8px;color:#0a0a0a;font-weight:600;padding-top:2px;display:none}
 .act-col:hover .act-val{display:block}
 .act-label{font-size:9px;color:#555;margin-top:4px;white-space:nowrap}
-.alert-box{background:#1a1010;border:1px solid #ef4444;border-radius:8px;padding:12px 16px;margin-bottom:16px}
+.alert-box{background:#1a1010;border:1px solid #ef4444;border-radius:8px;padding:12px 16px;margin-bottom:16px;cursor:pointer;transition:border-color .15s}
+.alert-box:hover{border-color:#ff6b6b}
 .alert-box h4{color:#ef4444;font-size:14px;margin-bottom:6px}
 .alert-box p{font-size:12px;color:#ccc}
 .logo{display:flex;align-items:center;gap:12px;margin-bottom:24px}
@@ -330,6 +424,22 @@ tr:hover{background:#1a1a1a}
 .logo-tag{font-size:9px;letter-spacing:3px;color:#666;text-transform:uppercase}
 .section{margin-bottom:32px}
 .section-title{font-size:15px;font-weight:600;color:#c4a77d;margin-bottom:12px;padding-bottom:6px;border-bottom:1px solid #222}
+/* MODAL */
+.modal-overlay{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.85);z-index:100;padding:40px 20px;overflow-y:auto;backdrop-filter:blur(4px)}
+.modal-overlay.open{display:block}
+.modal{max-width:1000px;margin:0 auto;background:#141414;border:1px solid #333;border-radius:12px;padding:24px}
+.modal-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid #222}
+.modal-title{font-size:20px;color:#c4a77d;font-weight:600;margin-bottom:4px}
+.modal-subtitle{font-size:12px;color:#888}
+.modal-close{background:none;border:1px solid #333;color:#888;width:32px;height:32px;border-radius:50%;cursor:pointer;font-size:18px;line-height:1}
+.modal-close:hover{color:#fff;border-color:#c4a77d}
+.def-box{background:#0f0f0f;border:1px solid #222;border-radius:8px;padding:14px;margin-bottom:20px}
+.def-box h4{font-size:11px;color:#c4a77d;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px}
+.def-box p{font-size:13px;color:#ccc;line-height:1.5;margin-bottom:6px}
+.def-box code{background:#1a1a1a;padding:2px 6px;border-radius:3px;color:#c4a77d;font-family:monospace;font-size:12px}
+.drill-title{font-size:13px;color:#888;text-transform:uppercase;letter-spacing:.5px;margin-bottom:12px}
+.modal table{font-size:12px}
+.modal th{font-size:10px;text-transform:uppercase}
 </style>
 </head>
 <body>
@@ -341,20 +451,20 @@ tr:hover{background:#1a1a1a}
 </div>
 
 <h1>Painel de Indicadores Operacionais</h1>
-<div class="sub">Atualizado: ${dataFmt} · Extração: ${meta.duracao}s · ${meta.projetosAtivos} projetos ativos de ${meta.totalProjetos}</div>
+<div class="sub">Atualizado: ${dataFmt} · Extração: ${meta.duracao}s · ${meta.projetosAtivos} projetos ativos de ${meta.totalProjetos} · <span style="color:#c4a77d">clique nos cards para detalhes</span></div>
 
-${I.ocsCriticas > 0 ? `<div class="alert-box"><h4>⚠ ${I.ocsCriticas} ocorrências CRÍTICAS sem resolução</h4><p>${I.ocsAbertas} de ${I.totalOcs} ocorrências abertas (${I.totalOcs > 0 ? ((I.ocsAbertas/I.totalOcs)*100).toFixed(0) : 0}%). Taxa de resolução: ${I.totalOcs > 0 ? (((I.totalOcs - I.ocsAbertas)/I.totalOcs)*100).toFixed(0) : 0}%.</p></div>` : ''}
+${I.ocsCriticas > 0 ? `<div class="alert-box" data-modal="criticas"><h4>⚠ ${I.ocsCriticas} ocorrências CRÍTICAS sem resolução</h4><p>${I.ocsAbertas} de ${I.totalOcs} ocorrências abertas (${I.totalOcs > 0 ? ((I.ocsAbertas/I.totalOcs)*100).toFixed(0) : 0}%). Taxa de resolução: ${I.totalOcs > 0 ? (((I.totalOcs - I.ocsAbertas)/I.totalOcs)*100).toFixed(0) : 0}%. Clique para ver detalhes.</p></div>` : ''}
 
 <div class="section">
 <div class="grid g4">
-  <div class="card kpi gold"><div class="val">${I.totalMsgs30d.toLocaleString('pt-BR')}</div><div class="label">Mensagens 30d</div></div>
-  <div class="card kpi blue"><div class="val">${I.comMsgs}</div><div class="label">Projetos com msgs</div></div>
-  <div class="card kpi ${parseFloat(I.taxaSilencio) > 15 ? 'amber' : 'green'}"><div class="val">${I.taxaSilencio}%</div><div class="label">Taxa silêncio</div></div>
-  <div class="card kpi ${I.totalOcs > 100 ? 'red' : 'amber'}"><div class="val">${I.totalOcs}</div><div class="label">Ocorrências abertas</div></div>
-  <div class="card kpi ${parseFloat(I.taxaAtraso) > 20 ? 'red' : parseFloat(I.taxaAtraso) > 15 ? 'amber' : 'green'}"><div class="val">${I.taxaAtraso}%</div><div class="label">Taxa atraso</div></div>
+  <div class="card kpi gold clickable" data-modal="msgs"><div class="val">${I.totalMsgs30d.toLocaleString('pt-BR')}</div><div class="label">Mensagens 30d</div></div>
+  <div class="card kpi blue clickable" data-modal="ativos"><div class="val">${I.comMsgs}</div><div class="label">Projetos com msgs</div></div>
+  <div class="card kpi ${parseFloat(I.taxaSilencio) > 15 ? 'amber' : 'green'} clickable" data-modal="silencio"><div class="val">${I.taxaSilencio}%</div><div class="label">Taxa silêncio</div></div>
+  <div class="card kpi ${I.totalOcs > 100 ? 'red' : 'amber'} clickable" data-modal="ocorrencias"><div class="val">${I.totalOcs}</div><div class="label">Ocorrências abertas</div></div>
+  <div class="card kpi ${parseFloat(I.taxaAtraso) > 20 ? 'red' : parseFloat(I.taxaAtraso) > 15 ? 'amber' : 'green'} clickable" data-modal="atraso"><div class="val">${I.taxaAtraso}%</div><div class="label">Taxa atraso</div></div>
   <div class="card kpi blue"><div class="val">${I.totalTG}</div><div class="label">Telegram</div></div>
   <div class="card kpi green"><div class="val">${I.totalWA}</div><div class="label">WhatsApp</div></div>
-  <div class="card kpi red"><div class="val">${I.ocsCriticas}</div><div class="label">Críticas</div></div>
+  <div class="card kpi red clickable" data-modal="criticas"><div class="val">${I.ocsCriticas}</div><div class="label">Críticas</div></div>
 </div>
 </div>
 
@@ -397,8 +507,150 @@ ${I.ocsCriticas > 0 ? `<div class="alert-box"><h4>⚠ ${I.ocsCriticas} ocorrênc
 </div>
 
 <div style="text-align:center;padding:20px;color:#444;font-size:11px">
-  Agente Indicadores Monofloor v1.0 · Atualização automática a cada ${INTERVALO_HORAS}h · Dados: KIRA API
+  Argos v1.1 · Atualização automática a cada ${INTERVALO_HORAS}h · Dados: KIRA API
 </div>
+
+<!-- MODAIS -->
+
+<div class="modal-overlay" id="modal-msgs">
+  <div class="modal">
+    <div class="modal-header">
+      <div><div class="modal-title">Mensagens — últimos 30 dias</div><div class="modal-subtitle">${I.totalMsgs30d.toLocaleString('pt-BR')} mensagens detectadas</div></div>
+      <button class="modal-close" data-close>×</button>
+    </div>
+    <div class="def-box">
+      <h4>Definição</h4>
+      <p>Total de mensagens trocadas nos grupos de Telegram e WhatsApp de obra detectadas pela <code>KIRA</code>.</p>
+      <h4 style="margin-top:12px">Critério</h4>
+      <p>Janela: <code>últimos 30 dias</code> corridos a partir de agora. Fonte: campo <code>timestamp</code> de cada mensagem. Inclui Telegram (${I.totalTG}) e WhatsApp (${I.totalWA}).</p>
+    </div>
+    <div class="drill-title">Top 50 projetos com mais mensagens</div>
+    <table><tr><th>Projeto</th><th class="num">Msgs</th><th class="num">TG</th><th class="num">WA</th><th class="num">Dias</th><th class="num">Autores</th><th>Fase</th></tr>${modalMsgsTable}</table>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal-ativos">
+  <div class="modal">
+    <div class="modal-header">
+      <div><div class="modal-title">Projetos com mensagens (30d)</div><div class="modal-subtitle">${I.comMsgs} projetos de ${totalAtivos} ativos</div></div>
+      <button class="modal-close" data-close>×</button>
+    </div>
+    <div class="def-box">
+      <h4>Definição</h4>
+      <p>Projetos que receberam pelo menos uma mensagem no Telegram ou WhatsApp nos últimos 30 dias.</p>
+      <h4 style="margin-top:12px">Critério</h4>
+      <p>Quantidade de projetos com <code>msgs30d &gt; 0</code>. Total analisado: ${totalAtivos} projetos ativos (excluindo finalizados, concluídos e cancelados).</p>
+    </div>
+    <div class="drill-title">Top 50 mais ativos</div>
+    <table><tr><th>Projeto</th><th class="num">Msgs</th><th class="num">TG</th><th class="num">WA</th><th class="num">Dias</th><th class="num">Autores</th><th>Fase</th></tr>${modalMsgsTable}</table>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal-silencio">
+  <div class="modal">
+    <div class="modal-header">
+      <div><div class="modal-title">Taxa de Silêncio</div><div class="modal-subtitle">${I.taxaSilencio}% — ${I.semMsgs} de ${totalAtivos} projetos ativos sem comunicação</div></div>
+      <button class="modal-close" data-close>×</button>
+    </div>
+    <div class="def-box">
+      <h4>Definição</h4>
+      <p>Percentual de projetos ativos <strong>sem qualquer mensagem</strong> no Telegram ou WhatsApp nos últimos 30 dias.</p>
+      <h4 style="margin-top:12px">Fórmula</h4>
+      <p><code>(projetos sem msgs nos últimos 30d) ÷ (total de projetos ativos) × 100</code></p>
+      <h4 style="margin-top:12px">Critério</h4>
+      <p>Um projeto é considerado "silencioso" quando <code>msgs30d == 0</code>. Projetos finalizados, concluídos e cancelados são excluídos do cálculo.</p>
+      <h4 style="margin-top:12px">Meta</h4>
+      <p>Manter abaixo de <code>10%</code>. Silêncio prolongado pode indicar problemas de acompanhamento, perda de visibilidade ou projetos abandonados.</p>
+    </div>
+    <div class="drill-title">Projetos silenciosos (${silenciososDetalhes.length})</div>
+    <table><tr><th>Projeto</th><th>Status</th><th>Fase</th><th>Consultor</th></tr>${modalSilTable}</table>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal-ocorrencias">
+  <div class="modal">
+    <div class="modal-header">
+      <div><div class="modal-title">Ocorrências Abertas</div><div class="modal-subtitle">${I.totalOcs} ocorrências registradas · ${I.ocsCriticas} críticas · ${I.ocsAbertas} ainda abertas</div></div>
+      <button class="modal-close" data-close>×</button>
+    </div>
+    <div class="def-box">
+      <h4>Definição</h4>
+      <p>Ocorrências operacionais registradas pela <code>KIRA</code> a partir da análise das mensagens dos grupos. Cada ocorrência tem <strong>tipo</strong> (falha_comunicacao, desvio_qualidade, atraso, etc) e <strong>severidade</strong> (crítica, alta, média, baixa).</p>
+      <h4 style="margin-top:12px">Critério</h4>
+      <p>Todas as ocorrências registradas nos projetos ativos, independente de data. Status "aberta" significa que ainda não foi resolvida.</p>
+      <h4 style="margin-top:12px">Distribuição por severidade</h4>
+      <p>🔴 Crítica: <code>${ocsPorSev.critica.length}</code> · 🟠 Alta: <code>${ocsPorSev.alta.length}</code> · 🟡 Média: <code>${ocsPorSev.media.length}</code> · 🟢 Baixa: <code>${ocsPorSev.baixa.length}</code></p>
+    </div>
+    <div class="drill-title">Ocorrências ordenadas por severidade (top 100)</div>
+    <table><tr><th>Sev</th><th>Título</th><th>Projeto</th><th>Tipo</th></tr>${modalOcsTable}</table>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal-criticas">
+  <div class="modal">
+    <div class="modal-header">
+      <div><div class="modal-title">Ocorrências Críticas</div><div class="modal-subtitle">${I.ocsCriticas} ocorrências com severidade crítica sem resolução</div></div>
+      <button class="modal-close" data-close>×</button>
+    </div>
+    <div class="def-box">
+      <h4>Definição</h4>
+      <p>Ocorrências marcadas com severidade <code>critica</code> pela KIRA. Representam situações de risco alto: clientes aguardando há semanas, defeitos graves em obra, quebras de comunicação prolongadas.</p>
+      <h4 style="margin-top:12px">Prioridade</h4>
+      <p>Todas as críticas devem ser tratadas imediatamente. Taxa de resolução atual: <code>0%</code>.</p>
+    </div>
+    <div class="drill-title">Críticas abertas (mais recentes primeiro)</div>
+    <table><tr><th>Título</th><th>Projeto</th><th>Tipo</th><th>Criada em</th></tr>${modalCritTable}</table>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modal-atraso">
+  <div class="modal">
+    <div class="modal-header">
+      <div><div class="modal-title">Taxa de Atraso</div><div class="modal-subtitle">${I.taxaAtraso}% — ${atrasadosDetalhes.length} projetos ultrapassaram a data prevista</div></div>
+      <button class="modal-close" data-close>×</button>
+    </div>
+    <div class="def-box">
+      <h4>Definição</h4>
+      <p>Percentual de projetos ativos cuja <code>dataExecucaoPrevista</code> já passou mas ainda não foram finalizados.</p>
+      <h4 style="margin-top:12px">Fórmula</h4>
+      <p><code>(projetos atrasados) ÷ (total ativos) × 100</code></p>
+      <h4 style="margin-top:12px">Critério</h4>
+      <p>Um projeto está atrasado quando <code>dataExecucaoPrevista &lt; hoje</code> <strong>E</strong> status não é <code>finalizado</code>, <code>concluido</code> ou <code>cancelado</code>.</p>
+      <h4 style="margin-top:12px">Meta</h4>
+      <p>Manter abaixo de <code>15%</code>. Acima de <code>20%</code> é sinal vermelho.</p>
+    </div>
+    <div class="drill-title">Projetos atrasados (mais atrasados primeiro)</div>
+    <table><tr><th>Projeto</th><th class="num">Atraso</th><th>Fase</th><th>Status</th><th>Consultor</th></tr>${modalAtrasoTable}</table>
+  </div>
+</div>
+
+<script>
+document.querySelectorAll('[data-modal]').forEach(el => {
+  el.addEventListener('click', () => {
+    const id = 'modal-' + el.dataset.modal;
+    const m = document.getElementById(id);
+    if (m) { m.classList.add('open'); document.body.style.overflow = 'hidden'; }
+  });
+});
+document.querySelectorAll('[data-close]').forEach(btn => {
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    btn.closest('.modal-overlay').classList.remove('open');
+    document.body.style.overflow = '';
+  });
+});
+document.querySelectorAll('.modal-overlay').forEach(ov => {
+  ov.addEventListener('click', (e) => {
+    if (e.target === ov) { ov.classList.remove('open'); document.body.style.overflow = ''; }
+  });
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    document.querySelectorAll('.modal-overlay.open').forEach(m => m.classList.remove('open'));
+    document.body.style.overflow = '';
+  }
+});
+</script>
 </body></html>`;
 }
 
