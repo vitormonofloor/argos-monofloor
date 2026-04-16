@@ -337,6 +337,147 @@ function gerarDashboard(dados) {
     `<tr><td>${s.nome.substring(0, 30)}</td><td>${s.status}</td><td>${s.fase.substring(0, 25)}</td></tr>`
   ).join('');
 
+  // ── AGRUPAMENTOS ANALÍTICOS PARA MODAIS ──
+
+  // Agrupar ocorrências por tipo (com severidade e timeline)
+  function agruparOcsPorTipo(ocs, totalReferencia) {
+    const grupos = {};
+    ocs.forEach(o => {
+      const tipo = o.tipo || 'indefinido';
+      if (!grupos[tipo]) {
+        grupos[tipo] = { total: 0, critica: 0, alta: 0, media: 0, baixa: 0, projetos: new Set(), consultores: new Set(), timeline: {}, ocs: [] };
+      }
+      grupos[tipo].total++;
+      if (grupos[tipo][o.severidade] !== undefined) grupos[tipo][o.severidade]++;
+      if (o.projeto) grupos[tipo].projetos.add(o.projeto);
+      if (o.consultor) grupos[tipo].consultores.add(o.consultor);
+      if (o.criado) {
+        const sem = o.criado.substring(0, 10);
+        grupos[tipo].timeline[sem] = (grupos[tipo].timeline[sem] || 0) + 1;
+      }
+      grupos[tipo].ocs.push(o);
+    });
+    return Object.entries(grupos)
+      .map(([tipo, g]) => ({
+        tipo,
+        total: g.total,
+        critica: g.critica,
+        alta: g.alta,
+        media: g.media,
+        baixa: g.baixa,
+        projetos: g.projetos.size,
+        consultores: g.consultores.size,
+        timeline: g.timeline,
+        ocs: g.ocs,
+        pct: totalReferencia ? (g.total / totalReferencia * 100).toFixed(1) : '0',
+      }))
+      .sort((a, b) => b.total - a.total);
+  }
+
+  const ocsPorTipo = agruparOcsPorTipo(todasOcs, todasOcs.length);
+  const ocsCriticasPorTipo = agruparOcsPorTipo(ocsCriticasDetalhes, ocsCriticasDetalhes.length);
+
+  // Agrupar silenciosos por fase
+  const silPorFase = {};
+  silenciososDetalhes.forEach(s => {
+    const f = s.fase || 'sem fase';
+    if (!silPorFase[f]) silPorFase[f] = [];
+    silPorFase[f].push(s);
+  });
+  const silPorFaseArr = Object.entries(silPorFase)
+    .map(([fase, lista]) => ({ fase, total: lista.length, pct: (lista.length / silenciososDetalhes.length * 100).toFixed(1), lista }))
+    .sort((a, b) => b.total - a.total);
+
+  // Agrupar silenciosos por consultor
+  const silPorConsultor = {};
+  silenciososDetalhes.forEach(s => {
+    const c = (s.consultor || 'sem consultor').split(' ').slice(0, 2).join(' ');
+    if (!silPorConsultor[c]) silPorConsultor[c] = [];
+    silPorConsultor[c].push(s);
+  });
+  const silPorConsultorArr = Object.entries(silPorConsultor)
+    .map(([cons, lista]) => ({ cons, total: lista.length, pct: (lista.length / silenciososDetalhes.length * 100).toFixed(1) }))
+    .sort((a, b) => b.total - a.total);
+
+  // Agrupar atrasados por fase
+  const atrasoPorFase = {};
+  atrasadosDetalhes.forEach(p => {
+    const f = p.fase || 'sem fase';
+    if (!atrasoPorFase[f]) atrasoPorFase[f] = { total: 0, somaDias: 0 };
+    atrasoPorFase[f].total++;
+    atrasoPorFase[f].somaDias += p.diasAtraso;
+  });
+  const atrasoPorFaseArr = Object.entries(atrasoPorFase)
+    .map(([fase, d]) => ({ fase, total: d.total, mediaDias: Math.round(d.somaDias / d.total), pct: (d.total / atrasadosDetalhes.length * 100).toFixed(1) }))
+    .sort((a, b) => b.total - a.total);
+
+  // Timeline global de ocorrências (últimos 30 dias, por dia)
+  const hoje30 = [];
+  for (let i = 29; i >= 0; i--) {
+    const d = new Date(agora.getTime() - i * 86400000);
+    hoje30.push(d.toISOString().substring(0, 10));
+  }
+  const timelineOcs = {};
+  todasOcs.forEach(o => {
+    if (o.criado) {
+      const d = o.criado.substring(0, 10);
+      timelineOcs[d] = (timelineOcs[d] || 0) + 1;
+    }
+  });
+  const timelineOcsSeq = hoje30.map(d => ({ data: d, total: timelineOcs[d] || 0 }));
+
+  // Helper: renderizar bloco de categoria com barra
+  function renderBlocoCategoria(item, totalGeral, corAcento) {
+    const pct = totalGeral ? (item.total / totalGeral * 100).toFixed(1) : '0';
+    const label = item.tipo ? item.tipo.replace(/_/g, ' ') : (item.fase || item.cons || 'item');
+    const stackSev = item.critica !== undefined ? `
+      <div class="stack-sev">
+        ${item.critica ? `<div class="stack-bar sev-critica-bg" style="flex:${item.critica}" title="${item.critica} críticas">${item.critica > 2 ? item.critica : ''}</div>` : ''}
+        ${item.alta ? `<div class="stack-bar sev-alta-bg" style="flex:${item.alta}" title="${item.alta} altas">${item.alta > 2 ? item.alta : ''}</div>` : ''}
+        ${item.media ? `<div class="stack-bar sev-media-bg" style="flex:${item.media}" title="${item.media} médias">${item.media > 2 ? item.media : ''}</div>` : ''}
+        ${item.baixa ? `<div class="stack-bar sev-baixa-bg" style="flex:${item.baixa}" title="${item.baixa} baixas">${item.baixa > 2 ? item.baixa : ''}</div>` : ''}
+      </div>
+    ` : '';
+    return `
+      <div class="cat-block">
+        <div class="cat-head">
+          <div class="cat-label">${label}</div>
+          <div class="cat-num"><strong>${item.total}</strong> <span style="color:#666">· ${pct}%</span></div>
+        </div>
+        <div class="cat-bar-wrap"><div class="cat-bar" style="width:${pct}%;background:${corAcento}"></div></div>
+        ${stackSev}
+        ${item.projetos !== undefined ? `<div class="cat-meta">${item.projetos} projeto${item.projetos !== 1 ? 's' : ''} · ${item.consultores} consultor${item.consultores !== 1 ? 'es' : ''}</div>` : ''}
+        ${item.mediaDias !== undefined ? `<div class="cat-meta">Média de ${item.mediaDias}d de atraso</div>` : ''}
+      </div>
+    `;
+  }
+
+  // Helper: sparkline SVG (30 dias)
+  function renderSparkline(seq, width = 600, height = 60) {
+    if (!seq.length) return '';
+    const max = Math.max(...seq.map(s => s.total), 1);
+    const stepX = width / (seq.length - 1 || 1);
+    const points = seq.map((s, i) => `${(i * stepX).toFixed(1)},${(height - (s.total / max) * height).toFixed(1)}`).join(' ');
+    const fillPoints = `0,${height} ${points} ${width},${height}`;
+    const bars = seq.map((s, i) => {
+      const h = (s.total / max) * height;
+      return `<rect x="${(i * stepX - stepX/3).toFixed(1)}" y="${(height - h).toFixed(1)}" width="${(stepX * 0.6).toFixed(1)}" height="${h.toFixed(1)}" fill="#c4a77d" opacity="0.2"><title>${s.data}: ${s.total}</title></rect>`;
+    }).join('');
+    const today = seq[seq.length - 1];
+    const avg = (seq.reduce((a, b) => a + b.total, 0) / seq.length).toFixed(1);
+    return `
+      <div class="sparkline-wrap">
+        <div class="sparkline-stats"><span>Hoje: <strong>${today.total}</strong></span> <span>Média 30d: <strong>${avg}</strong></span> <span>Máx: <strong>${max}</strong></span></div>
+        <svg viewBox="0 0 ${width} ${height}" preserveAspectRatio="none" style="width:100%;height:${height}px">
+          ${bars}
+          <polygon points="${fillPoints}" fill="#c4a77d" opacity="0.08"/>
+          <polyline points="${points}" fill="none" stroke="#c4a77d" stroke-width="1.5"/>
+        </svg>
+        <div class="sparkline-labels"><span>${seq[0].data.substring(5)}</span><span>${seq[Math.floor(seq.length/2)].data.substring(5)}</span><span>${seq[seq.length-1].data.substring(5)}</span></div>
+      </div>
+    `;
+  }
+
   // ── PRÉ-RENDERIZAR TABELAS DOS MODAIS ──
 
   const modalMsgsTable = ativosDetalhes.map(p =>
@@ -361,6 +502,16 @@ function gerarDashboard(dados) {
   const modalAtrasoTable = atrasadosDetalhes.map(p =>
     `<tr><td>${p.nome.substring(0, 32)}</td><td class="num sev-critica">${p.diasAtraso}d</td><td>${p.fase.substring(0, 22)}</td><td><span class="tag">${p.status}</span></td><td>${(p.consultor || '').split(' ').slice(0, 2).join(' ')}</td></tr>`
   ).join('');
+
+  // Blocos por tipo de ocorrência (para modal de ocorrências)
+  const blocosOcsPorTipo = ocsPorTipo.map(g => renderBlocoCategoria(g, todasOcs.length, '#c4a77d')).join('');
+  const blocosCriticasPorTipo = ocsCriticasPorTipo.map(g => renderBlocoCategoria(g, ocsCriticasDetalhes.length, '#ef4444')).join('');
+  const blocosSilPorFase = silPorFaseArr.map(s => renderBlocoCategoria({ fase: s.fase, total: s.total }, silenciososDetalhes.length, '#f59e0b')).join('');
+  const blocosSilPorConsultor = silPorConsultorArr.map(s => renderBlocoCategoria({ cons: s.cons, total: s.total }, silenciososDetalhes.length, '#f59e0b')).join('');
+  const blocosAtrasoPorFase = atrasoPorFaseArr.map(a => renderBlocoCategoria({ fase: a.fase, total: a.total, mediaDias: a.mediaDias }, atrasadosDetalhes.length, '#ef4444')).join('');
+
+  // Sparkline global de ocorrências
+  const sparklineOcs = renderSparkline(timelineOcsSeq);
 
   const totalAtivos = projetos.length;
 
@@ -440,6 +591,44 @@ tr:hover{background:#1a1a1a}
 .drill-title{font-size:13px;color:#888;text-transform:uppercase;letter-spacing:.5px;margin-bottom:12px}
 .modal table{font-size:12px}
 .modal th{font-size:10px;text-transform:uppercase}
+/* Analytical blocks */
+.cat-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;margin-bottom:20px}
+.cat-block{background:#0a0a0a;border:1px solid #222;border-radius:8px;padding:12px 14px}
+.cat-head{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px;gap:8px}
+.cat-label{font-size:12px;color:#e0e0e0;text-transform:capitalize;font-weight:500}
+.cat-num{font-size:13px;color:#c4a77d;white-space:nowrap}
+.cat-num strong{font-size:16px;font-weight:700}
+.cat-bar-wrap{background:#1a1a1a;border-radius:3px;height:6px;overflow:hidden;margin-bottom:8px}
+.cat-bar{height:100%;border-radius:3px;transition:width .4s}
+.stack-sev{display:flex;gap:2px;height:14px;border-radius:3px;overflow:hidden;background:#1a1a1a;margin-bottom:6px}
+.stack-bar{font-size:9px;color:#0a0a0a;font-weight:700;display:flex;align-items:center;justify-content:center;min-width:2px}
+.sev-critica-bg{background:#ef4444}
+.sev-alta-bg{background:#f59e0b}
+.sev-media-bg{background:#3b82f6}
+.sev-baixa-bg{background:#22c55e}
+.cat-meta{font-size:10px;color:#666;margin-top:4px}
+/* Sparkline */
+.sparkline-wrap{background:#0a0a0a;border:1px solid #222;border-radius:8px;padding:14px;margin-bottom:20px}
+.sparkline-stats{display:flex;gap:20px;font-size:11px;color:#888;margin-bottom:8px}
+.sparkline-stats strong{color:#c4a77d;font-size:14px}
+.sparkline-labels{display:flex;justify-content:space-between;font-size:9px;color:#555;margin-top:4px;font-variant-numeric:tabular-nums}
+/* Distribution grid */
+.dist-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-bottom:20px}
+.dist-card{background:#0a0a0a;border:1px solid #222;border-radius:6px;padding:10px 12px;text-align:center}
+.dist-card .v{font-size:22px;font-weight:700;line-height:1}
+.dist-card .l{font-size:10px;color:#888;margin-top:4px;text-transform:uppercase;letter-spacing:.3px}
+.dist-card.critica .v{color:#ef4444}
+.dist-card.alta .v{color:#f59e0b}
+.dist-card.media .v{color:#3b82f6}
+.dist-card.baixa .v{color:#22c55e}
+/* Tabs within modal */
+.modal-tabs{display:flex;gap:2px;border-bottom:1px solid #222;margin-bottom:16px}
+.modal-tab{padding:8px 14px;font-size:12px;color:#888;cursor:pointer;border-bottom:2px solid transparent;background:none;border-top:none;border-left:none;border-right:none;font-family:inherit}
+.modal-tab.active{color:#c4a77d;border-bottom-color:#c4a77d}
+.modal-tab:hover{color:#e0e0e0}
+.tab-content{display:none}
+.tab-content.active{display:block}
+.section-h{font-size:11px;color:#888;text-transform:uppercase;letter-spacing:.5px;margin:20px 0 10px;font-weight:600}
 </style>
 </head>
 <body>
@@ -552,37 +741,97 @@ ${I.ocsCriticas > 0 ? `<div class="alert-box" data-modal="criticas"><h4>⚠ ${I.
       <div><div class="modal-title">Taxa de Silêncio</div><div class="modal-subtitle">${I.taxaSilencio}% — ${I.semMsgs} de ${totalAtivos} projetos ativos sem comunicação</div></div>
       <button class="modal-close" data-close>×</button>
     </div>
-    <div class="def-box">
-      <h4>Definição</h4>
-      <p>Percentual de projetos ativos <strong>sem qualquer mensagem</strong> no Telegram ou WhatsApp nos últimos 30 dias.</p>
-      <h4 style="margin-top:12px">Fórmula</h4>
-      <p><code>(projetos sem msgs nos últimos 30d) ÷ (total de projetos ativos) × 100</code></p>
-      <h4 style="margin-top:12px">Critério</h4>
-      <p>Um projeto é considerado "silencioso" quando <code>msgs30d == 0</code>. Projetos finalizados, concluídos e cancelados são excluídos do cálculo.</p>
-      <h4 style="margin-top:12px">Meta</h4>
-      <p>Manter abaixo de <code>10%</code>. Silêncio prolongado pode indicar problemas de acompanhamento, perda de visibilidade ou projetos abandonados.</p>
+
+    <div class="dist-grid">
+      <div class="dist-card"><div class="v" style="color:#f59e0b">${I.taxaSilencio}%</div><div class="l">Taxa de silêncio</div></div>
+      <div class="dist-card"><div class="v" style="color:#ef4444">${I.semMsgs}</div><div class="l">Silenciosos</div></div>
+      <div class="dist-card"><div class="v" style="color:#22c55e">${I.comMsgs}</div><div class="l">Com atividade</div></div>
+      <div class="dist-card"><div class="v" style="color:#c4a77d">${totalAtivos}</div><div class="l">Total ativos</div></div>
     </div>
-    <div class="drill-title">Projetos silenciosos (${silenciososDetalhes.length})</div>
-    <table><tr><th>Projeto</th><th>Status</th><th>Fase</th><th>Consultor</th></tr>${modalSilTable}</table>
+
+    <div class="modal-tabs">
+      <button class="modal-tab active" data-tab="tab-sil-fase">Por Fase</button>
+      <button class="modal-tab" data-tab="tab-sil-cons">Por Consultor</button>
+      <button class="modal-tab" data-tab="tab-sil-lista">Lista Completa</button>
+      <button class="modal-tab" data-tab="tab-sil-def">Definição</button>
+    </div>
+
+    <div class="tab-content active" id="tab-sil-fase">
+      <div class="section-h">Silenciosos agrupados por fase atual</div>
+      <div class="cat-grid">${blocosSilPorFase}</div>
+    </div>
+
+    <div class="tab-content" id="tab-sil-cons">
+      <div class="section-h">Silenciosos agrupados por consultor</div>
+      <div class="cat-grid">${blocosSilPorConsultor}</div>
+    </div>
+
+    <div class="tab-content" id="tab-sil-lista">
+      <div class="section-h">Lista completa (${silenciososDetalhes.length})</div>
+      <table><tr><th>Projeto</th><th>Status</th><th>Fase</th><th>Consultor</th></tr>${modalSilTable}</table>
+    </div>
+
+    <div class="tab-content" id="tab-sil-def">
+      <div class="def-box">
+        <h4>Definição</h4>
+        <p>Percentual de projetos ativos <strong>sem qualquer mensagem</strong> no Telegram ou WhatsApp nos últimos 30 dias.</p>
+        <h4 style="margin-top:12px">Fórmula</h4>
+        <p><code>(projetos sem msgs nos últimos 30d) ÷ (total de projetos ativos) × 100</code></p>
+        <h4 style="margin-top:12px">Critério</h4>
+        <p>Um projeto é considerado "silencioso" quando <code>msgs30d == 0</code>. Projetos finalizados, concluídos e cancelados são excluídos do cálculo.</p>
+        <h4 style="margin-top:12px">Meta</h4>
+        <p>Manter abaixo de <code>10%</code>. Silêncio prolongado pode indicar problemas de acompanhamento, perda de visibilidade ou projetos abandonados.</p>
+      </div>
+    </div>
   </div>
 </div>
 
 <div class="modal-overlay" id="modal-ocorrencias">
   <div class="modal">
     <div class="modal-header">
-      <div><div class="modal-title">Ocorrências Abertas</div><div class="modal-subtitle">${I.totalOcs} ocorrências registradas · ${I.ocsCriticas} críticas · ${I.ocsAbertas} ainda abertas</div></div>
+      <div><div class="modal-title">Ocorrências Abertas</div><div class="modal-subtitle">${I.totalOcs} ocorrências registradas · ${I.ocsCriticas} críticas · 0 resolvidas</div></div>
       <button class="modal-close" data-close>×</button>
     </div>
-    <div class="def-box">
-      <h4>Definição</h4>
-      <p>Ocorrências operacionais registradas pela <code>KIRA</code> a partir da análise das mensagens dos grupos. Cada ocorrência tem <strong>tipo</strong> (falha_comunicacao, desvio_qualidade, atraso, etc) e <strong>severidade</strong> (crítica, alta, média, baixa).</p>
-      <h4 style="margin-top:12px">Critério</h4>
-      <p>Todas as ocorrências registradas nos projetos ativos, independente de data. Status "aberta" significa que ainda não foi resolvida.</p>
-      <h4 style="margin-top:12px">Distribuição por severidade</h4>
-      <p>🔴 Crítica: <code>${ocsPorSev.critica.length}</code> · 🟠 Alta: <code>${ocsPorSev.alta.length}</code> · 🟡 Média: <code>${ocsPorSev.media.length}</code> · 🟢 Baixa: <code>${ocsPorSev.baixa.length}</code></p>
+
+    <div class="dist-grid">
+      <div class="dist-card critica"><div class="v">${ocsPorSev.critica.length}</div><div class="l">Críticas</div></div>
+      <div class="dist-card alta"><div class="v">${ocsPorSev.alta.length}</div><div class="l">Altas</div></div>
+      <div class="dist-card media"><div class="v">${ocsPorSev.media.length}</div><div class="l">Médias</div></div>
+      <div class="dist-card baixa"><div class="v">${ocsPorSev.baixa.length}</div><div class="l">Baixas</div></div>
+      <div class="dist-card"><div class="v" style="color:#c4a77d">${ocsPorTipo.length}</div><div class="l">Tipos distintos</div></div>
+      <div class="dist-card"><div class="v" style="color:#c4a77d">${new Set(todasOcs.map(o => o.projeto)).size}</div><div class="l">Projetos afetados</div></div>
     </div>
-    <div class="drill-title">Ocorrências ordenadas por severidade (top 100)</div>
-    <table><tr><th>Sev</th><th>Título</th><th>Projeto</th><th>Tipo</th></tr>${modalOcsTable}</table>
+
+    <div class="section-h">Tendência — últimos 30 dias</div>
+    ${sparklineOcs}
+
+    <div class="modal-tabs">
+      <button class="modal-tab active" data-tab="tab-ocs-tipo">Por Tipo</button>
+      <button class="modal-tab" data-tab="tab-ocs-lista">Lista Detalhada</button>
+      <button class="modal-tab" data-tab="tab-ocs-def">Definição</button>
+    </div>
+
+    <div class="tab-content active" id="tab-ocs-tipo">
+      <div class="section-h">Distribuição por categoria · clique no bloco para filtrar</div>
+      <div class="cat-grid">${blocosOcsPorTipo}</div>
+      <p style="font-size:11px;color:#666;margin-top:8px">Legenda: <span class="sev-critica" style="padding:1px 6px">crítica</span> <span class="sev-alta" style="padding:1px 6px">alta</span> <span class="sev-media" style="padding:1px 6px">média</span> <span class="sev-baixa" style="padding:1px 6px">baixa</span></p>
+    </div>
+
+    <div class="tab-content" id="tab-ocs-lista">
+      <div class="section-h">Top 100 por severidade</div>
+      <table><tr><th>Sev</th><th>Título</th><th>Projeto</th><th>Tipo</th></tr>${modalOcsTable}</table>
+    </div>
+
+    <div class="tab-content" id="tab-ocs-def">
+      <div class="def-box">
+        <h4>Definição</h4>
+        <p>Ocorrências operacionais registradas pela <code>KIRA</code> a partir da análise das mensagens dos grupos. Cada ocorrência tem <strong>tipo</strong> (falha_comunicacao, desvio_qualidade, atraso, etc) e <strong>severidade</strong> (crítica, alta, média, baixa).</p>
+        <h4 style="margin-top:12px">Critério</h4>
+        <p>Todas as ocorrências registradas nos projetos ativos, independente de data. Status "aberta" significa que ainda não foi resolvida.</p>
+        <h4 style="margin-top:12px">Taxa de resolução atual</h4>
+        <p><code>0%</code> — nenhuma ocorrência foi marcada como resolvida até o momento. Este é um dos gaps operacionais mais urgentes.</p>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -592,14 +841,29 @@ ${I.ocsCriticas > 0 ? `<div class="alert-box" data-modal="criticas"><h4>⚠ ${I.
       <div><div class="modal-title">Ocorrências Críticas</div><div class="modal-subtitle">${I.ocsCriticas} ocorrências com severidade crítica sem resolução</div></div>
       <button class="modal-close" data-close>×</button>
     </div>
-    <div class="def-box">
-      <h4>Definição</h4>
-      <p>Ocorrências marcadas com severidade <code>critica</code> pela KIRA. Representam situações de risco alto: clientes aguardando há semanas, defeitos graves em obra, quebras de comunicação prolongadas.</p>
-      <h4 style="margin-top:12px">Prioridade</h4>
-      <p>Todas as críticas devem ser tratadas imediatamente. Taxa de resolução atual: <code>0%</code>.</p>
+
+    <div class="dist-grid">
+      <div class="dist-card critica"><div class="v">${I.ocsCriticas}</div><div class="l">Críticas</div></div>
+      <div class="dist-card"><div class="v" style="color:#c4a77d">${new Set(ocsCriticasDetalhes.map(o => o.projeto)).size}</div><div class="l">Projetos</div></div>
+      <div class="dist-card"><div class="v" style="color:#c4a77d">${new Set(ocsCriticasDetalhes.map(o => o.consultor)).size}</div><div class="l">Consultores</div></div>
+      <div class="dist-card"><div class="v" style="color:#c4a77d">${ocsCriticasPorTipo.length}</div><div class="l">Tipos distintos</div></div>
     </div>
-    <div class="drill-title">Críticas abertas (mais recentes primeiro)</div>
-    <table><tr><th>Título</th><th>Projeto</th><th>Tipo</th><th>Criada em</th></tr>${modalCritTable}</table>
+
+    <div class="modal-tabs">
+      <button class="modal-tab active" data-tab="tab-crit-tipo">Por Tipo</button>
+      <button class="modal-tab" data-tab="tab-crit-lista">Lista Completa</button>
+    </div>
+
+    <div class="tab-content active" id="tab-crit-tipo">
+      <div class="section-h">Categorias de ocorrências críticas</div>
+      <div class="cat-grid">${blocosCriticasPorTipo}</div>
+      <p style="font-size:11px;color:#666;margin-top:8px">Todas as críticas devem ser tratadas imediatamente. Taxa de resolução atual: <code style="color:#ef4444">0%</code>.</p>
+    </div>
+
+    <div class="tab-content" id="tab-crit-lista">
+      <div class="section-h">Críticas abertas (mais recentes primeiro)</div>
+      <table><tr><th>Título</th><th>Projeto</th><th>Tipo</th><th>Criada em</th></tr>${modalCritTable}</table>
+    </div>
   </div>
 </div>
 
@@ -609,18 +873,42 @@ ${I.ocsCriticas > 0 ? `<div class="alert-box" data-modal="criticas"><h4>⚠ ${I.
       <div><div class="modal-title">Taxa de Atraso</div><div class="modal-subtitle">${I.taxaAtraso}% — ${atrasadosDetalhes.length} projetos ultrapassaram a data prevista</div></div>
       <button class="modal-close" data-close>×</button>
     </div>
-    <div class="def-box">
-      <h4>Definição</h4>
-      <p>Percentual de projetos ativos cuja <code>dataExecucaoPrevista</code> já passou mas ainda não foram finalizados.</p>
-      <h4 style="margin-top:12px">Fórmula</h4>
-      <p><code>(projetos atrasados) ÷ (total ativos) × 100</code></p>
-      <h4 style="margin-top:12px">Critério</h4>
-      <p>Um projeto está atrasado quando <code>dataExecucaoPrevista &lt; hoje</code> <strong>E</strong> status não é <code>finalizado</code>, <code>concluido</code> ou <code>cancelado</code>.</p>
-      <h4 style="margin-top:12px">Meta</h4>
-      <p>Manter abaixo de <code>15%</code>. Acima de <code>20%</code> é sinal vermelho.</p>
+
+    <div class="dist-grid">
+      <div class="dist-card"><div class="v" style="color:${parseFloat(I.taxaAtraso) > 20 ? '#ef4444' : '#f59e0b'}">${I.taxaAtraso}%</div><div class="l">Taxa</div></div>
+      <div class="dist-card"><div class="v" style="color:#ef4444">${atrasadosDetalhes.length}</div><div class="l">Atrasados</div></div>
+      <div class="dist-card"><div class="v" style="color:#c4a77d">${atrasadosDetalhes.length ? Math.round(atrasadosDetalhes.reduce((s, p) => s + p.diasAtraso, 0) / atrasadosDetalhes.length) : 0}d</div><div class="l">Atraso médio</div></div>
+      <div class="dist-card"><div class="v" style="color:#ef4444">${atrasadosDetalhes.filter(p => p.diasAtraso > 30).length}</div><div class="l">+30d atrasados</div></div>
     </div>
-    <div class="drill-title">Projetos atrasados (mais atrasados primeiro)</div>
-    <table><tr><th>Projeto</th><th class="num">Atraso</th><th>Fase</th><th>Status</th><th>Consultor</th></tr>${modalAtrasoTable}</table>
+
+    <div class="modal-tabs">
+      <button class="modal-tab active" data-tab="tab-atr-fase">Por Fase</button>
+      <button class="modal-tab" data-tab="tab-atr-lista">Lista Completa</button>
+      <button class="modal-tab" data-tab="tab-atr-def">Definição</button>
+    </div>
+
+    <div class="tab-content active" id="tab-atr-fase">
+      <div class="section-h">Atrasados agrupados por fase atual</div>
+      <div class="cat-grid">${blocosAtrasoPorFase}</div>
+    </div>
+
+    <div class="tab-content" id="tab-atr-lista">
+      <div class="section-h">Lista ordenada por dias de atraso</div>
+      <table><tr><th>Projeto</th><th class="num">Atraso</th><th>Fase</th><th>Status</th><th>Consultor</th></tr>${modalAtrasoTable}</table>
+    </div>
+
+    <div class="tab-content" id="tab-atr-def">
+      <div class="def-box">
+        <h4>Definição</h4>
+        <p>Percentual de projetos ativos cuja <code>dataExecucaoPrevista</code> já passou mas ainda não foram finalizados.</p>
+        <h4 style="margin-top:12px">Fórmula</h4>
+        <p><code>(projetos atrasados) ÷ (total ativos) × 100</code></p>
+        <h4 style="margin-top:12px">Critério</h4>
+        <p>Um projeto está atrasado quando <code>dataExecucaoPrevista &lt; hoje</code> <strong>E</strong> status não é <code>finalizado</code>, <code>concluido</code> ou <code>cancelado</code>.</p>
+        <h4 style="margin-top:12px">Meta</h4>
+        <p>Manter abaixo de <code>15%</code>. Acima de <code>20%</code> é sinal vermelho.</p>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -642,6 +930,18 @@ document.querySelectorAll('[data-close]').forEach(btn => {
 document.querySelectorAll('.modal-overlay').forEach(ov => {
   ov.addEventListener('click', (e) => {
     if (e.target === ov) { ov.classList.remove('open'); document.body.style.overflow = ''; }
+  });
+});
+// Tab switching inside modals
+document.querySelectorAll('.modal-tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    const targetId = tab.dataset.tab;
+    const modal = tab.closest('.modal');
+    modal.querySelectorAll('.modal-tab').forEach(t => t.classList.remove('active'));
+    modal.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+    tab.classList.add('active');
+    const target = modal.querySelector('#' + targetId);
+    if (target) target.classList.add('active');
   });
 });
 document.addEventListener('keydown', (e) => {
