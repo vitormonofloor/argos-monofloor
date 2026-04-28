@@ -1213,19 +1213,33 @@ app.get('/api/executar', async (req, res) => {
 
 // ── START ───────────────────────────────────────────────────────
 
-const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => {
-  console.log(`\n🤖 Agente Indicadores Monofloor v1.0 — port ${PORT}`);
+// Modo RUN_ONCE — executa cicloCompleto 1× e sai (uso em cron externo, ex: GitHub Actions)
+// Trial Railway expirou em 28/04/2026 → migrado para GitHub Actions com cron 6h.
+if (process.env.RUN_ONCE === '1') {
+  console.log(`\n🤖 Agente Indicadores Monofloor — modo RUN_ONCE`);
   console.log(`   KIRA: ${KIRA_URL}`);
   console.log(`   GitHub: ${GH_REPO}/${GH_FILE}`);
-  console.log(`   Telegram: ${VITOR_CHAT_ID ? '✓' : '⚠️ não configurado'}`);
-  console.log(`   Intervalo: ${INTERVALO_HORAS}h\n`);
+  console.log(`   Telegram: ${VITOR_CHAT_ID ? '✓' : '⚠️ não configurado'}\n`);
 
-  startScheduler();
+  cicloCompleto()
+    .then(() => { console.log('[AGENTE] Ciclo OK · saindo'); process.exit(0); })
+    .catch((e) => { console.error('[AGENTE] FATAL:', e); process.exit(1); });
+} else {
+  // Modo SERVER (uso original Railway) — express + scheduler interno
+  const PORT = process.env.PORT || 3001;
+  app.listen(PORT, () => {
+    console.log(`\n🤖 Agente Indicadores Monofloor v1.0 — port ${PORT}`);
+    console.log(`   KIRA: ${KIRA_URL}`);
+    console.log(`   GitHub: ${GH_REPO}/${GH_FILE}`);
+    console.log(`   Telegram: ${VITOR_CHAT_ID ? '✓' : '⚠️ não configurado'}`);
+    console.log(`   Intervalo: ${INTERVALO_HORAS}h\n`);
 
-  // Primeira execução 60s após boot
-  setTimeout(() => {
-    console.log('[AGENTE] Primeira execução automática...');
-    cicloCompleto();
-  }, 60000);
-});
+    startScheduler();
+
+    // Primeira execução 60s após boot
+    setTimeout(() => {
+      console.log('[AGENTE] Primeira execução automática...');
+      cicloCompleto();
+    }, 60000);
+  });
+}
